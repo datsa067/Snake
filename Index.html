@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Змейка</title>
+<style>
+body{margin:0;background:#000;color:#fff;font-family:Arial;text-align:center}
+canvas{background:#0b3d2e;border:2px solid #555;margin:10px auto;display:block}
+select,button{padding:6px;font-size:14px;margin:2px}
+.panel{display:flex;flex-wrap:wrap;justify-content:center}
+.controls{display:grid;grid-template-columns:60px 60px 60px;grid-template-rows:60px 60px;gap:6px;justify-content:center}
+.up{grid-column:2}
+.left{grid-column:1;grid-row:2}
+.right{grid-column:3;grid-row:2}
+.down{grid-column:2;grid-row:2}
+</style>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#000000">
+</head>
+
+<body>
+
+<h2>🐍 Змейка</h2>
+
+<div>
+Очки: <span id="score">0</span> |
+Монеты: <span id="coins">0</span> |
+Рекорд: <span id="record">0</span>
+</div>
+<div>
+🔥 Серия входа: <span id="streak">0</span> дней
+</div>
+
+<div class="panel">
+<select id="mode">
+  <option value="walls">Со стенами</option>
+  <option value="nowalls">Без стен</option>
+</select>
+
+<select id="speed">
+  <option value="200">Медленно</option>
+  <option value="120" selected>Средне</option>
+  <option value="70">Быстро</option>
+</select>
+
+<select id="mapSize">
+  <option value="10">Маленькая</option>
+  <option value="16" selected>Средняя</option>
+  <option value="24">Большая</option>
+</select>
+
+<select id="skin">
+  <option value="green">Зелёный</option>
+  <option value="cosmos">🌌 Космос</option>
+  <option value="rainbow">🌈 Радуга</option>
+  <option value="bw">⚫⚪ Ч/Б</option>
+</select>
+
+<button onclick="start()">▶ Старт</button>
+<button onclick="pause=!pause">⏸ Пауза</button>
+<button onclick="showAch()">🏆 Достижения</button>
+</div>
+
+<div class="panel">
+<button onclick="buy('cosmos',2500)">Космос — 2500</button>
+<button onclick="buy('rainbow',5000)">Радуга — 5000</button>
+</div>
+
+<canvas id="c"></canvas>
+
+<div class="controls">
+<button class="up" onclick="setDir(0,-1)">↑</button>
+<button class="left" onclick="setDir(-1,0)">←</button>
+<button class="right" onclick="setDir(1,0)">→</button>
+<button class="down" onclick="setDir(0,1)">↓</button>
+</div>
+
+<script>
+/* ---------- КОНСТАНТЫ ---------- */
+const c = document.getElementById("c");
+const x = c.getContext("2d");
+
+const scoreSpan = document.getElementById("score");
+const coinsSpan = document.getElementById("coins");
+const recordSpan = document.getElementById("record");
+const streakSpan = document.getElementById("streak");
+
+const skinSel = document.getElementById("skin");
+const modeSel = document.getElementById("mode");
+const speedSel = document.getElementById("speed");
+const mapSel = document.getElementById("mapSize");
+
+/* ---------- СОСТОЯНИЕ ---------- */
+let grid = 16;
+let size = 16;
+let score = 0;
+let maxLength = 10;
+let snake = [];
+let dir = {x:1,y:0};
+let food = null;
+let chest = null;
+let loop = null;
+let pause = false;
+
+/* ---------- СОХРАНЕНИЯ ---------- */
+let coins = +localStorage.coins || 0;
+let record = +localStorage.record || 0;
+let owned = JSON.parse(localStorage.owned || '{"green":true}');
+let ach = JSON.parse(localStorage.ach || '{}');
+
+let streak = +localStorage.streak || 0;
+let lastDay = localStorage.lastDay || "";
+
+/* ---------- UI ---------- */
+coinsSpan.textContent = coins;
+recordSpan.textContent = record;
+streakSpan.textContent = streak;
+
+/* ---------- СЕРИЯ ВХОДА ---------- */
+function checkDaily(){
+ const today = new Date().toDateString();
+ const yesterday = new Date(Date.now()-86400000).toDateString();
+
+ if(!lastDay) streak = 1;
+ else if(lastDay === yesterday) streak++;
+ else if(lastDay !== today) streak = 1;
+
+ lastDay = today;
+ localStorage.streak = streak;
+ localStorage.lastDay = lastDay;
+ streakSpan.textContent = streak;
+}
+
+/* ---------- СТАРТ ---------- */
+function start(){
+ if(!owned[skinSel.value]) skinSel.value="green";
+
+ clearInterval(loop);
+ pause=false;
+ score=0;
+
+ size = +mapSel.value;
+ maxLength = size===10 ? 5 : size===16 ? 10 : 15;
+
+ c.width = size * grid;
+ c.height = size * grid;
+
+ snake=[{x:Math.floor(size/2),y:Math.floor(size/2)}];
+ dir={x:1,y:0};
+ food=rand();
+ chest=null;
+
+ loop=setInterval(tick, +speedSel.value);
+}
+
+/* ---------- ИГРОВОЙ ЦИКЛ ---------- */
+function tick(){
+ if(pause) return;
+
+ let h={x:snake[0].x+dir.x,y:snake[0].y+dir.y};
+
+ if(modeSel.value==="nowalls"){
+  h.x=(h.x+size)%size;
+  h.y=(h.y+size)%size;
+ } else if(h.x<0||h.y<0||h.x>=size||h.y>=size){
+  return gameOver();
+ }
+
+ snake.unshift(h);
+
+ if(h.x===food.x && h.y===food.y){
+  score++;
+  coins++;
+  food=rand();
+  if(snake.length>maxLength) snake.pop();
+ } else snake.pop();
+
+ achievements();
+ draw();
+
+ scoreSpan.textContent=score;
+ coinsSpan.textContent=coins;
+ save();
+}
+
+/* ---------- ОТРИСОВКА ---------- */
+function draw(){
+ x.clearRect(0,0,c.width,c.height);
+
+ x.fillStyle="red";
+ x.fillRect(food.x*grid,food.y*grid,grid,grid);
+
+ let skin = owned[skinSel.value]?skinSel.value:"green";
+
+ snake.forEach((s,i)=>{
+  if(skin==="green") x.fillStyle="lime";
+  if(skin==="rainbow") x.fillStyle=`hsl(${Date.now()/6+i*20},100%,50%)`;
+  if(skin==="cosmos"){
+   let g=x.createLinearGradient(0,0,grid,grid);
+   g.addColorStop(0,"#f0f"); g.addColorStop(1,"#0ff");
+   x.fillStyle=g;
+  }
+  if(skin==="bw"){
+   x.fillStyle=`hsl(0,0%,${50+Math.sin(Date.now()/200+i)*40}%)`;
+  }
+  x.fillRect(s.x*grid,s.y*grid,grid,grid);
+ });
+}
+
+/* ---------- ДОСТИЖЕНИЯ ---------- */
+function achievements(){
+ if(score>=100&&!ach.a100){coins+=100;ach.a100=true}
+ if(score>=250&&!ach.a250){coins+=400;ach.a250=true}
+ if(score>=500&&!ach.a500){coins+=1000;ach.a500=true}
+ if(score>=1000&&!owned.bw){owned.bw=true}
+}
+
+/* ---------- МАГАЗИН ---------- */
+function buy(s,p){
+ if(owned[s]) return alert("Уже куплено");
+ if(coins<p) return alert("Не хватает монет");
+ coins-=p;
+ owned[s]=true;
+ save();
+ alert("Куплено!");
+}
+
+/* ---------- ПРОЧЕЕ ---------- */
+function showAch(){
+ alert(
+`🏆 Достижения
+100 очков: ${ach.a100?"✔":"✖"}
+250 очков: ${ach.a250?"✔":"✖"}
+500 очков: ${ach.a500?"✔":"✖"}
+1000 очков: ${owned.bw?"✔ Ч/Б":"✖"}`
+ );
+}
+
+function gameOver(){
+ clearInterval(loop);
+ if(score>record){record=score;localStorage.record=record}
+ save();
+ alert("❌ Вы проиграли");
+}
+
+function rand(){
+ return {x:Math.floor(Math.random()*size),y:Math.floor(Math.random()*size)};
+}
+
+function setDir(x,y){
+ if(-x===dir.x && -y===dir.y) return;
+ dir={x,y};
+}
+
+function save(){
+ localStorage.coins=coins;
+ localStorage.owned=JSON.stringify(owned);
+ localStorage.ach=JSON.stringify(ach);
+}
+
+skinSel.onchange=()=>{
+ if(!owned[skinSel.value]){
+  alert("Скин не открыт");
+  skinSel.value="green";
+ }
+};
+
+window.onload = checkDaily;
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("service-worker.js");
+}
+</script>
+</body>
+</html>
